@@ -1,0 +1,290 @@
+diff --git a/software/gemmini-rocc-tests b/software/gemmini-rocc-tests
+--- a/software/gemmini-rocc-tests
++++ b/software/gemmini-rocc-tests
+@@ -1 +1 @@
+-Subproject commit 1a1a1c6bd60df6d7cae3d87aac96c8f406cae084
++Subproject commit 1a1a1c6bd60df6d7cae3d87aac96c8f406cae084-dirty
+diff --git a/src/main/scala/gemmini/AccumulatorScale.scala b/src/main/scala/gemmini/AccumulatorScale.scala
+index 2541f9b..a3c54a9 100644
+--- a/src/main/scala/gemmini/AccumulatorScale.scala
++++ b/src/main/scala/gemmini/AccumulatorScale.scala
+@@ -63,20 +63,21 @@ class AccScalePipe[T <: Data, U <: Data](t: T, rDataType: Vec[Vec[T]], scale_fun
+ 
+   val e_act = MuxCase(e, Seq(
+     (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu,
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++  ) ++ (if (has_normalizations) Seq(
++    (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+       (e - io.in.bits.mean),
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.IGELU) ->
++    (has_nonlinear_activations.B && act === Activation.IGELU) ->
+       AccumulatorScale.igelu(e, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++    (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+       AccumulatorScale.iexp(e - io.in.bits.max, io.in.bits.iexp_qln2, io.in.bits.iexp_qln2_inv, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
+-  ))
++  ) else Seq()))
+ 
+-  val e_scaled = scale_func(e_act, MuxCase(io.in.bits.scale, Seq(
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++  val e_scaled = scale_func(e_act, MuxCase(io.in.bits.scale, if (has_normalizations) Seq(
++    (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+       io.in.bits.inv_stddev,
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++    (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+       io.in.bits.inv_sum_exp.asTypeOf(scale_t)
+-  )).asTypeOf(scale_t))
++  ) else Seq()).asTypeOf(scale_t))
+ 
+   val e_clipped = e_scaled.clippedToWidthOf(rDataType.head.head)
+ 
+@@ -116,20 +117,21 @@ class AccumulatorScale[T <: Data, U <: Data](
+     val activated_data = VecInit(data.map(v => VecInit(v.map { e =>
+       val e_act = MuxCase(e, Seq(
+         (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu,
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++      ) ++ (if (has_normalizations) Seq(
++        (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+           (e - io.in.bits.mean),
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.IGELU) ->
++        (has_nonlinear_activations.B && act === Activation.IGELU) ->
+           AccumulatorScale.igelu(e, igelu_qb, igelu_qc),
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++        (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+           AccumulatorScale.iexp(e - io.in.bits.max, iexp_qln2, iexp_qln2_inv, igelu_qb, igelu_qc),
+-      ))
++      ) else Seq()))
+ 
+-      val e_scaled = scale_func(e_act, MuxCase(scale, Seq(
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++      val e_scaled = scale_func(e_act, MuxCase(scale, if (has_normalizations) Seq(
++        (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+           io.in.bits.inv_stddev,
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++        (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+           io.in.bits.inv_sum_exp.asTypeOf(scale_t)
+-      )).asTypeOf(scale_t))
++      ) else Seq()).asTypeOf(scale_t))
+ 
+       val e_clipped = e_scaled.clippedToWidthOf(rDataType.head.head)
+ 
+diff --git a/src/main/scala/gemmini/Configs.scala b/src/main/scala/gemmini/Configs.scala
+index a849883..4c83ff8 100644
+--- a/src/main/scala/gemmini/Configs.scala
++++ b/src/main/scala/gemmini/Configs.scala
+@@ -4,7 +4,7 @@ import chisel3._
+ import org.chipsalliance.cde.config.{Config, Parameters}
+ import freechips.rocketchip.diplomacy.LazyModule
+ import freechips.rocketchip.subsystem._
+-import freechips.rocketchip.tile.{BuildRoCC, OpcodeSet, XLen}
++import freechips.rocketchip.tile.{BuildRoCC, OpcodeSet}
+ import freechips.rocketchip.rocket._
+ import freechips.rocketchip.tile._
+ import freechips.rocketchip.system._
+diff --git a/src/main/scala/gemmini/Controller.scala b/src/main/scala/gemmini/Controller.scala
+index 0fdda55..3c39c92 100644
+--- a/src/main/scala/gemmini/Controller.scala
++++ b/src/main/scala/gemmini/Controller.scala
+@@ -32,7 +32,7 @@ class Gemmini[T <: Data : Arithmetic, U <: Data, V <: Data](val config: GemminiA
+     System.exit(1)
+   }
+ 
+-  val xLen = p(XLen)
++  val xLen = p(TileKey).core.xLen
+   val spad = LazyModule(new Scratchpad(config))
+ 
+   override lazy val module = new GemminiModule(this)
+diff --git a/src/main/scala/gemmini/ExecuteController.scala b/src/main/scala/gemmini/ExecuteController.scala
+index 13f45ee..97cb4c2 100644
+--- a/src/main/scala/gemmini/ExecuteController.scala
++++ b/src/main/scala/gemmini/ExecuteController.scala
+@@ -872,6 +872,12 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
+ 
+   when (cntl_valid) {
+     // Default inputs
++    // NOTE: 상류의 data drop 수정(493c45a)을 여기에 적용했다가 되돌렸다.
++    // 그 수정은 각 피연산자의 valid를 다른 피연산자의 ready에 의존시키는데,
++    // 우리가 고정한 Mesh/MeshWithDelays 버전과 결합하면 순환 의존이 생겨
++    // 100회 이내에 시스템이 교착한다(E85, 재현 확인).
++    // 상류는 같은 시기에 Mesh.scala·MeshWithDelays.scala도 함께 바꿨으므로
++    // 이 수정만 떼어 적용할 수 없다.
+     mesh.io.a.valid := cntl.a_fire && dataA_valid
+     mesh.io.b.valid := cntl.b_fire && dataB_valid
+     mesh.io.d.valid := cntl.d_fire && dataD_valid
+@@ -918,7 +924,10 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
+ 
+   val write_this_row = Mux(current_dataflow === Dataflow.WS.id.U, output_counter < w_matrix_rows,
+     w_total_output_rows - 1.U - output_counter < w_matrix_rows)
+-  val w_mask = (0 until block_size).map(_.U < w_matrix_cols) // This is an element-wise mask, rather than a byte-wise mask
++  // 비정방형(E153): 이 마스크는 출력의 **열**에 대한 것이므로(w_matrix_cols와 비교)
++  // 크기도 열 방향이어야 한다. block_size(=행)는 정방형에서만 우연히 일치한다.
++  val block_cols = meshColumns * tileColumns
++  val w_mask = (0 until block_cols).map(_.U < w_matrix_cols) // This is an element-wise mask, rather than a byte-wise mask
+ 
+   // Write to normal scratchpad
+   for(i <- 0 until sp_banks) {
+diff --git a/src/main/scala/gemmini/GemminiConfigs.scala b/src/main/scala/gemmini/GemminiConfigs.scala
+index 9825429..dbeccff 100644
+--- a/src/main/scala/gemmini/GemminiConfigs.scala
++++ b/src/main/scala/gemmini/GemminiConfigs.scala
+@@ -27,6 +27,7 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
+                                                                              tileColumns: Int = 1,
+                                                                              meshRows: Int = 16,
+                                                                              meshColumns: Int = 16,
++                                                                             allow_nonsquare: Boolean = false,
+ 
+                                                                              ld_queue_length: Int = 8,
+                                                                              st_queue_length: Int = 2,
+@@ -181,7 +182,11 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
+   //==========================================================================
+   val BLOCK_ROWS = tileRows * meshRows
+   val BLOCK_COLS = tileColumns * meshColumns
+-  require(BLOCK_ROWS == BLOCK_COLS, "BLOCK_ROWS != BLOCK_COLS!")
++  // 비정방형 메쉬 실험(E153): 정방형 강제를 완화한다. 상류도 `// TODO remove this
++  // requirement`로 본질적 제약이 아님을 표시해 두었다. DIM은 여전히 하나의 값이므로
++  // 소프트웨어(gemmini.h, DIM 참조 373회)는 비정방형을 이해하지 못한다 —
++  // 측정은 라이브러리 대신 gemmini_rt.h(원시 ISA)로 한다.
++  require(BLOCK_ROWS == BLOCK_COLS || allow_nonsquare, "BLOCK_ROWS != BLOCK_COLS!")
+ 
+   val DIM             = BLOCK_ROWS
+   val LOG2_DIM        = log2Up(DIM)
+@@ -224,11 +229,11 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
+   val ACC_ROWS        = ACC_BANKS * ACC_BANK_ROWS
+   val LOG2_ACC_ROWS   = log2Up(ACC_ROWS)
+ 
+-  val MNK_BYTES                   = Int.MaxValue / DIM  // TODO: upper bound?
++  val MNK_BYTES                   = 0x20000000 / DIM  // TODO: upper bound?
+   val LOG2_MNK_BYTES              = log2Up(MNK_BYTES)
+   val MNK_BYTES_PER_TILE_ROW      = MNK_BYTES * DIM
+   val LOG2_MNK_BYTES_PER_TILE_ROW = log2Up(MNK_BYTES_PER_TILE_ROW)
+-  val TILE_IDX                    = MNK_BYTES / (DIM / cisc_dim)
++  val TILE_IDX                    = MNK_BYTES / DIM * cisc_dim
+   val LOG2_TILE_IDX               = log2Up(TILE_IDX)
+ 
+   //--------------------------------------------------------------------------
+@@ -265,7 +270,8 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
+ 
+   require(isPow2(sp_bank_entries), "each SRAM bank must have a power-of-2 rows, to simplify address calculations") // TODO remove this requirement
+   require(sp_bank_entries % (meshRows * tileRows) == 0, "the number of rows in a bank must be a multiple of the dimensions of the systolic array")
+-  require(meshColumns * tileColumns == meshRows * tileRows, "the systolic array must be square") // TODO remove this requirement
++  require(meshColumns * tileColumns == meshRows * tileRows || allow_nonsquare,
++          "the systolic array must be square") // 비정방형 실험 시 allow_nonsquare로 우회
+   require(meshColumns * tileColumns >= 2, "the systolic array must have a dimension of at least 2") // TODO remove this requirement
+   require(isPow2(meshColumns * tileColumns), "the systolic array's dimensions must be powers of 2") // TODO remove this requirement
+   require(acc_bank_entries % (meshRows * tileRows) == 0, "the number of rows in an accumulator bank must be a multiple of the dimensions of the systolic array")
+@@ -315,7 +321,12 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
+       }
+     }
+ 
+-    assert(tileColumns*meshColumns == tileRows*meshRows)
++    // 이 assert는 **헤더 생성 함수 안**에 있다 — 정방형 강제의 최종 근거가
++    // "생성 헤더에 DIM이 하나뿐"이라는 소프트웨어 모델 제약임을 보여준다(E153).
++    // 비정방형에서는 DIM_ROWS/DIM_COLS를 따로 내보내고 DIM은 행 방향으로 둔다.
++    // 기존 라이브러리(gemmini.h)는 DIM만 보므로 비정방형에서 올바르게 동작하지 않는다 —
++    // 측정은 gemmini_rt.h로 한다.
++    assert(tileColumns*meshColumns == tileRows*meshRows || allow_nonsquare)
+     assert(Set(8, 16, 32, 64).contains(inputType.getWidth))
+     // assert(Set(8, 16, 32, 64).contains(outputType.getWidth))
+     assert(Set(8, 16, 32, 64).contains(accType.getWidth))
+@@ -335,6 +346,9 @@ case class GemminiArrayConfig[T <: Data : Arithmetic, U <: Data, V <: Data](
+     header ++= s"#define XCUSTOM_ACC $opcodeid\n"
+ 
+     header ++= s"#define DIM ${tileColumns*meshColumns}\n"
++    // 비정방형 실험(E153): 행/열을 구분해 함께 내보낸다. 정방형이면 셋이 같다.
++    header ++= s"#define DIM_ROWS ${tileRows*meshRows}\n"
++    header ++= s"#define DIM_COLS ${tileColumns*meshColumns}\n"
+     header ++= s"#define ADDR_LEN 32\n"
+     header ++= s"#define BANK_NUM $sp_banks\n"
+     header ++= s"#define BANK_ROWS $sp_bank_entries\n"
+diff --git a/src/main/scala/gemmini/MeshWithDelays.scala b/src/main/scala/gemmini/MeshWithDelays.scala
+index 516760b..461e1b6 100644
+--- a/src/main/scala/gemmini/MeshWithDelays.scala
++++ b/src/main/scala/gemmini/MeshWithDelays.scala
+@@ -42,7 +42,8 @@ class MeshWithDelays[T <: Data: Arithmetic, U <: TagQueueTag with Data]
+   val D_TYPE = Vec(meshColumns, Vec(tileColumns, inputType))
+   val S_TYPE = Vec(meshColumns, Vec(tileColumns, new PEControl(accType)))
+ 
+-  assert(meshRows*tileRows == meshColumns*tileColumns)
++  // 비정방형 실험(E153): 정방형 assert 제거. block_size는 행 방향(A가 들어가는 쪽)을 쓴다.
++  // 열 방향과 다르면 이 값이 무엇을 뜻하는지가 모호해지므로, 어디가 깨지는지 확인이 목적이다.
+   val block_size = meshRows*tileRows
+ 
+   val latency_per_pe = ((tile_latency + 1).toFloat / (tileRows min tileColumns)) max 1.0f
+@@ -149,16 +150,25 @@ class MeshWithDelays[T <: Data: Arithmetic, U <: TagQueueTag with Data]
+   val pause = !req.valid || !input_next_row_into_spatial_array
+ 
+   // Transposer
+-  val a_is_from_transposer = Mux(req.bits.pe_control.dataflow === Dataflow.OS.id.U, !req.bits.a_transpose, req.bits.a_transpose)
+-  val b_is_from_transposer = req.bits.pe_control.dataflow === Dataflow.OS.id.U && req.bits.bd_transpose
+-  val d_is_from_transposer = req.bits.pe_control.dataflow === Dataflow.WS.id.U && req.bits.bd_transpose
++  // 비정방형 실험(E153): 전치기는 정방 전용이다(AlwaysOutTransposer(block_size)).
++  // A 경로(행 방향, 크기 meshRows*tileRows)와 B/D 경로(열 방향, meshColumns*tileColumns)가
++  // **하나의 전치기를 공유**하므로, 두 크기가 다르면 아래 MuxCase가 타입 충돌을 낸다.
++  // 기본 WS matmul은 전치를 쓰지 않으므로 비정방형에서는 전치 경로를 끈다.
++  // (대가: 전치 matmul과 OS 데이터플로가 불가능해진다 — OS는 전치기를 항상 쓴다.)
++  val nonsquare = (meshRows*tileRows) != (meshColumns*tileColumns)
++  val a_is_from_transposer = if (nonsquare) false.B else
++    Mux(req.bits.pe_control.dataflow === Dataflow.OS.id.U, !req.bits.a_transpose, req.bits.a_transpose)
++  val b_is_from_transposer = if (nonsquare) false.B else
++    (req.bits.pe_control.dataflow === Dataflow.OS.id.U && req.bits.bd_transpose)
++  val d_is_from_transposer = if (nonsquare) false.B else
++    (req.bits.pe_control.dataflow === Dataflow.WS.id.U && req.bits.bd_transpose)
+   val transposer = Module(new AlwaysOutTransposer(block_size, inputType))
+ 
+   transposer.io.inRow.valid := !pause && (a_is_from_transposer || b_is_from_transposer || d_is_from_transposer)
+-  transposer.io.inRow.bits := MuxCase(VecInit(a_buf.flatten), Seq(
++  transposer.io.inRow.bits := (if (nonsquare) VecInit(a_buf.flatten) else MuxCase(VecInit(a_buf.flatten), Seq(
+     b_is_from_transposer -> VecInit(b_buf.flatten),
+     d_is_from_transposer -> VecInit(d_buf.flatten.reverse),
+-  ))
++  )))
+ 
+   transposer.io.outCol.ready := true.B
+   val transposer_out = VecInit(transposer.io.outCol.bits.grouped(tileRows).map(t => VecInit(t)).toSeq)
+@@ -167,9 +177,11 @@ class MeshWithDelays[T <: Data: Arithmetic, U <: TagQueueTag with Data]
+   val mesh = Module(new Mesh(inputType, outputType, accType, df, tree_reduction, tile_latency, max_simultaneous_matmuls, output_delay, tileRows, tileColumns, meshRows, meshColumns))
+ 
+   // TODO wire only to *_buf here, instead of io.*.bits
+-  val a_shifter_in = WireInit(Mux(a_is_from_transposer, transposer_out.asTypeOf(A_TYPE), a_buf))
+-  val b_shifter_in = WireInit(Mux(b_is_from_transposer, transposer_out.asTypeOf(B_TYPE), b_buf))
+-  val d_shifter_in = WireInit(Mux(d_is_from_transposer,
++  // 비정방형(E153): 전치기 출력은 행 방향 크기(meshRows*tileRows)이므로
++  // 열 방향인 B/D 경로에 그대로 넣을 수 없다. 전치를 끈 상태이므로 버퍼를 직결한다.
++  val a_shifter_in = WireInit(if (nonsquare) a_buf else Mux(a_is_from_transposer, transposer_out.asTypeOf(A_TYPE), a_buf))
++  val b_shifter_in = WireInit(if (nonsquare) b_buf else Mux(b_is_from_transposer, transposer_out.asTypeOf(B_TYPE), b_buf))
++  val d_shifter_in = WireInit(if (nonsquare) d_buf else Mux(d_is_from_transposer,
+     VecInit(transposer_out.flatten.reverse.grouped(tileRows).map(VecInit(_)).toSeq).asTypeOf(D_TYPE), d_buf))
+ 
+   mesh.io.in_a := shifted(a_shifter_in, leftBanks)
+diff --git a/src/main/scala/gemmini/Scratchpad.scala b/src/main/scala/gemmini/Scratchpad.scala
+index cdd6306..8e88e4f 100644
+--- a/src/main/scala/gemmini/Scratchpad.scala
++++ b/src/main/scala/gemmini/Scratchpad.scala
+@@ -499,8 +499,8 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T,
+         bio.read.resp.ready := Mux(bio.read.resp.bits.fromDMA, dma_read_resp.ready, ex_read_resp.ready)
+ 
+         dma_read_pipe.ready := writer.module.io.req.ready &&
+-          !write_issue_q.io.deq.bits.laddr.is_acc_addr && write_issue_q.io.deq.bits.laddr.sp_bank() === i.U && // I believe we don't need to check that write_issue_q is valid here, because if the SRAM's resp is valid, then that means that the write_issue_q's deq should also be valid
+-          !write_issue_q.io.deq.bits.laddr.is_garbage()
++          (!write_issue_q.io.deq.bits.laddr.is_acc_addr && write_issue_q.io.deq.bits.laddr.sp_bank() === i.U &&
++          write_issue_q.io.deq.valid) && !write_issue_q.io.deq.bits.laddr.is_garbage()
+         when (dma_read_pipe.fire) {
+           writeData.valid := true.B
+           writeData.bits := dma_read_pipe.bits.data
+@@ -603,9 +603,15 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T,
+ 
+     acc_scale_unit.io.out.ready := false.B
+ 
++    // E91 실험: 여기에 `write_issue_q.io.deq.valid`를 추가했던 것(내가 상류 근거 없이 넣은 수정)이
++    // 원시 ISA 경로의 오답을 늘렸는지 확인하기 위해 되돌린 상태다.
++    // 501행의 스크래치패드 쪽 수정(상류 dd8b74e)은 유지한다.
++    // FP 구성(BF16/FP32)에서 누산기 경로 교착을 막기 위해 필요하다(E52, E60).
++    // INT8 권장 구성(D9-FINAL)은 이 수정 없이 빌드된 것이 보관돼 있다(E95).
+     val dma_resp_ready =
+       writer.module.io.req.ready &&
+-        write_issue_q.io.deq.bits.laddr.is_acc_addr &&
++        (write_issue_q.io.deq.bits.laddr.is_acc_addr &&
++        write_issue_q.io.deq.valid) &&
+         !write_issue_q.io.deq.bits.laddr.is_garbage()
+ 
+     when (acc_scale_unit.io.out.bits.fromDMA && dma_resp_ready) {

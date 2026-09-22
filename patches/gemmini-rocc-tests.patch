@@ -1,0 +1,75 @@
+# Fixes for gemmini-rocc-tests (nested submodule of generators/gemmini).
+#
+# This submodule is listed in SKIP_SUBMODULES, so the top-level Makefile never
+# checks it out or patches it. Apply by hand after initialising it:
+#
+#   git -C generators/gemmini submodule update --init software/gemmini-rocc-tests
+#   git -C generators/gemmini/software/gemmini-rocc-tests apply ../../../../patches/gemmini-rocc-tests.patch
+#
+# Contents (see experiments/JOURNAL.md for the measurements behind each):
+#  1. gemmini_testutils.h - rdcycle -> rdtime. Modern kernels trap user-mode rdcycle,
+#     so every timed test dies with SIGILL on real hardware (E7).
+#  2. gemmini.h, matmul_cpu SOFTMAX - guard the integer I-BERT reference behind
+#     ELEM_T_IS_FLOAT; it shifts acc_t and cannot compile for FP element types (E30).
+#  3. gemmini.h, matmul_cpu SOFTMAX - saturate the exponent shift the way the hardware
+#     does. Without it z >= 32 makes "int32 >> z" undefined; on RISC-V it wraps mod 32
+#     and the reference disagrees with correct softmax by up to 94/127, which makes a
+#     perfectly good accelerator look broken (E39, E40).
+#
+diff --git a/include/gemmini.h b/include/gemmini.h
+index 8eb89cb..ad493eb 100644
+--- a/include/gemmini.h
++++ b/include/gemmini.h
+@@ -1056,6 +1056,14 @@ static void matmul_cpu(bool transA, bool transB, size_t DIM_I, size_t DIM_J, siz
+           *c = scale_and_sat(c_buffer[j], act, scale, bert_scale);
+         }
+       } else if (act == SOFTMAX) {
++#ifdef ELEM_T_IS_FLOAT
++        // The reference softmax below is the integer (I-BERT) formulation and uses
++        // shifts on acc_t, so it does not compile for floating-point element types.
++        // Gemmini's normalization units are integer-only as well - see the matching
++        // guard in AccumulatorScale.scala (patches/gemmini.patch).
++        printf("SOFTMAX reference not available for floating-point elem_t\n");
++        exit(1);
++#else
+         const scale_t a = 0.3585;
+         const scale_t b = 1.353;
+         const scale_t c = 0.344;
+@@ -1077,9 +1085,15 @@ static void matmul_cpu(bool transA, bool transB, size_t DIM_I, size_t DIM_J, siz
+         for (size_t j = 0; j < DIM_J; j++) {
+           acc_t q = c_buffer[j] - max_q;
+           acc_t z = (acc_t) (-q * qln2_inv) >> 16;
++          // Saturate the shift the way the hardware does (AccumulatorScale.scala:401).
++          // Without this, elements far below the row max give z >= 32 and the shift
++          // below is undefined for int32 - on RISC-V it wraps mod 32 and leaves the
++          // exponent unshifted, so the reference disagrees with correct softmax by up
++          // to ~94/127. See experiments/JOURNAL.md E39.
++          if (z > 32) z = 32;
+           acc_t qp = q + z * qln2;
+           acc_t q_exp = (qp + qb)*(qp + qb) + qc;
+-          c_buffer[j] = q_exp >> z;
++          c_buffer[j] = z >= 31 ? 0 : (q_exp >> z);
+           sum_exp += c_buffer[j];
+         }
+ 
+@@ -1089,6 +1103,7 @@ static void matmul_cpu(bool transA, bool transB, size_t DIM_I, size_t DIM_J, siz
+           elem_t* c = C + (i * stride_C) + j;
+           *c = scale_and_sat(c_buffer[j], act, factor, bert_scale);
+         }
++#endif
+       }
+     }
+   }
+diff --git a/include/gemmini_testutils.h b/include/gemmini_testutils.h
+index 71af874..4917db7 100644
+--- a/include/gemmini_testutils.h
++++ b/include/gemmini_testutils.h
+@@ -272,7 +272,7 @@ static int is_equal_transposed(elem_t x[DIM][DIM], elem_t y[DIM][DIM]) {
+ 
+ static uint64_t read_cycles() {
+     uint64_t cycles;
+-    asm volatile ("rdcycle %0" : "=r" (cycles));
++    asm volatile ("rdtime %0" : "=r" (cycles));
+     return cycles;
+ 
+     // const uint32_t * mtime = (uint32_t *)(33554432 + 0xbff8);

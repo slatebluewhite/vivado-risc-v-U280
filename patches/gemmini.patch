@@ -1,3 +1,67 @@
+diff --git a/src/main/scala/gemmini/AccumulatorScale.scala b/src/main/scala/gemmini/AccumulatorScale.scala
+index 2541f9b..a3c54a9 100644
+--- a/src/main/scala/gemmini/AccumulatorScale.scala
++++ b/src/main/scala/gemmini/AccumulatorScale.scala
+@@ -63,20 +63,21 @@ class AccScalePipe[T <: Data, U <: Data](t: T, rDataType: Vec[Vec[T]], scale_fun
+ 
+   val e_act = MuxCase(e, Seq(
+     (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu,
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++  ) ++ (if (has_normalizations) Seq(
++    (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+       (e - io.in.bits.mean),
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.IGELU) ->
++    (has_nonlinear_activations.B && act === Activation.IGELU) ->
+       AccumulatorScale.igelu(e, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++    (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+       AccumulatorScale.iexp(e - io.in.bits.max, io.in.bits.iexp_qln2, io.in.bits.iexp_qln2_inv, io.in.bits.igelu_qb, io.in.bits.igelu_qc),
+-  ))
++  ) else Seq()))
+ 
+-  val e_scaled = scale_func(e_act, MuxCase(io.in.bits.scale, Seq(
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++  val e_scaled = scale_func(e_act, MuxCase(io.in.bits.scale, if (has_normalizations) Seq(
++    (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+       io.in.bits.inv_stddev,
+-    (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++    (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+       io.in.bits.inv_sum_exp.asTypeOf(scale_t)
+-  )).asTypeOf(scale_t))
++  ) else Seq()).asTypeOf(scale_t))
+ 
+   val e_clipped = e_scaled.clippedToWidthOf(rDataType.head.head)
+ 
+@@ -116,20 +117,21 @@ class AccumulatorScale[T <: Data, U <: Data](
+     val activated_data = VecInit(data.map(v => VecInit(v.map { e =>
+       val e_act = MuxCase(e, Seq(
+         (has_nonlinear_activations.B && act === Activation.RELU) -> e.relu,
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++      ) ++ (if (has_normalizations) Seq(
++        (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+           (e - io.in.bits.mean),
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.IGELU) ->
++        (has_nonlinear_activations.B && act === Activation.IGELU) ->
+           AccumulatorScale.igelu(e, igelu_qb, igelu_qc),
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++        (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+           AccumulatorScale.iexp(e - io.in.bits.max, iexp_qln2, iexp_qln2_inv, igelu_qb, igelu_qc),
+-      ))
++      ) else Seq()))
+ 
+-      val e_scaled = scale_func(e_act, MuxCase(scale, Seq(
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.LAYERNORM) ->
++      val e_scaled = scale_func(e_act, MuxCase(scale, if (has_normalizations) Seq(
++        (has_nonlinear_activations.B && act === Activation.LAYERNORM) ->
+           io.in.bits.inv_stddev,
+-        (has_nonlinear_activations.B && has_normalizations.B && act === Activation.SOFTMAX) ->
++        (has_nonlinear_activations.B && act === Activation.SOFTMAX) ->
+           io.in.bits.inv_sum_exp.asTypeOf(scale_t)
+-      )).asTypeOf(scale_t))
++      ) else Seq()).asTypeOf(scale_t))
+ 
+       val e_clipped = e_scaled.clippedToWidthOf(rDataType.head.head)
+ 
 diff --git a/src/main/scala/gemmini/Configs.scala b/src/main/scala/gemmini/Configs.scala
 index a849883..4c83ff8 100644
 --- a/src/main/scala/gemmini/Configs.scala
@@ -24,6 +88,23 @@ index 0fdda55..3c39c92 100644
    val spad = LazyModule(new Scratchpad(config))
  
    override lazy val module = new GemminiModule(this)
+diff --git a/src/main/scala/gemmini/ExecuteController.scala b/src/main/scala/gemmini/ExecuteController.scala
+index 13f45ee..3d8e46f 100644
+--- a/src/main/scala/gemmini/ExecuteController.scala
++++ b/src/main/scala/gemmini/ExecuteController.scala
+@@ -872,6 +872,12 @@ class ExecuteController[T <: Data, U <: Data, V <: Data](xLen: Int, tagWidth: In
+ 
+   when (cntl_valid) {
+     // Default inputs
++    // NOTE: 상류의 data drop 수정(493c45a)을 여기에 적용했다가 되돌렸다.
++    // 그 수정은 각 피연산자의 valid를 다른 피연산자의 ready에 의존시키는데,
++    // 우리가 고정한 Mesh/MeshWithDelays 버전과 결합하면 순환 의존이 생겨
++    // 100회 이내에 시스템이 교착한다(E85, 재현 확인).
++    // 상류는 같은 시기에 Mesh.scala·MeshWithDelays.scala도 함께 바꿨으므로
++    // 이 수정만 떼어 적용할 수 없다.
+     mesh.io.a.valid := cntl.a_fire && dataA_valid
+     mesh.io.b.valid := cntl.b_fire && dataB_valid
+     mesh.io.d.valid := cntl.d_fire && dataD_valid
 diff --git a/src/main/scala/gemmini/GemminiConfigs.scala b/src/main/scala/gemmini/GemminiConfigs.scala
 index 9825429..3a2f6f2 100644
 --- a/src/main/scala/gemmini/GemminiConfigs.scala
@@ -42,3 +123,35 @@ index 9825429..3a2f6f2 100644
    val LOG2_TILE_IDX               = log2Up(TILE_IDX)
  
    //--------------------------------------------------------------------------
+diff --git a/src/main/scala/gemmini/Scratchpad.scala b/src/main/scala/gemmini/Scratchpad.scala
+index cdd6306..8e88e4f 100644
+--- a/src/main/scala/gemmini/Scratchpad.scala
++++ b/src/main/scala/gemmini/Scratchpad.scala
+@@ -499,8 +499,8 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T,
+         bio.read.resp.ready := Mux(bio.read.resp.bits.fromDMA, dma_read_resp.ready, ex_read_resp.ready)
+ 
+         dma_read_pipe.ready := writer.module.io.req.ready &&
+-          !write_issue_q.io.deq.bits.laddr.is_acc_addr && write_issue_q.io.deq.bits.laddr.sp_bank() === i.U && // I believe we don't need to check that write_issue_q is valid here, because if the SRAM's resp is valid, then that means that the write_issue_q's deq should also be valid
+-          !write_issue_q.io.deq.bits.laddr.is_garbage()
++          (!write_issue_q.io.deq.bits.laddr.is_acc_addr && write_issue_q.io.deq.bits.laddr.sp_bank() === i.U &&
++          write_issue_q.io.deq.valid) && !write_issue_q.io.deq.bits.laddr.is_garbage()
+         when (dma_read_pipe.fire) {
+           writeData.valid := true.B
+           writeData.bits := dma_read_pipe.bits.data
+@@ -603,9 +603,15 @@ class Scratchpad[T <: Data, U <: Data, V <: Data](config: GemminiArrayConfig[T,
+ 
+     acc_scale_unit.io.out.ready := false.B
+ 
++    // E91 실험: 여기에 `write_issue_q.io.deq.valid`를 추가했던 것(내가 상류 근거 없이 넣은 수정)이
++    // 원시 ISA 경로의 오답을 늘렸는지 확인하기 위해 되돌린 상태다.
++    // 501행의 스크래치패드 쪽 수정(상류 dd8b74e)은 유지한다.
++    // FP 구성(BF16/FP32)에서 누산기 경로 교착을 막기 위해 필요하다(E52, E60).
++    // INT8 권장 구성(D9-FINAL)은 이 수정 없이 빌드된 것이 보관돼 있다(E95).
+     val dma_resp_ready =
+       writer.module.io.req.ready &&
+-        write_issue_q.io.deq.bits.laddr.is_acc_addr &&
++        (write_issue_q.io.deq.bits.laddr.is_acc_addr &&
++        write_issue_q.io.deq.valid) &&
+         !write_issue_q.io.deq.bits.laddr.is_garbage()
+ 
+     when (acc_scale_unit.io.out.bits.fromDMA && dma_resp_ready) {
