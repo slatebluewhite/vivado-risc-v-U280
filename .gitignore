@@ -17,3 +17,20 @@
 /.ivy2/
 /.sbt/
 /.Xilinx/
+
+# --- U280 + Gemmini 포크에서 추가 ---
+# Vivado / xsim 부산물
+/vivado.log
+/vivado.jou
+/xelab.pb
+/xvlog.pb
+/xsim.dir/
+/tb.v
+# Chisel 이 CONFIG 마다 다시 생성한다
+/gemmini_params.h
+# rocket.scala 의 로컬 회전 백업 (실수 복구용, 공유 대상 아님)
+/patches/.backup/
+# 컴파일된 RISC-V 테스트 바이너리 — .c 소스가 같이 있으므로 재빌드 가능
+experiments/tests/*
+!experiments/tests/*.*
+!experiments/tests/include/

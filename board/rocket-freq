@@ -14,13 +14,17 @@ vc707         Rocket.*          100.0
 (genesys2|kc705|.*xc7k325t)  Rocket.*b[4-9].*      80.0
 (genesys2|kc705|.*xc7k325t)  Rocket.*              100.0
 
-(vcu1525|u200|u250)      Rocket64.*gem.*            31.25
-(vcu1525|u200|u250)      Rocket64[xyz].*            31.25
-(vcu1525|u200|u250)      Rocket[0-9]*b[2-9][0-9].*  62.5
-(vcu1525|u200|u250)      Rocket[0-9]*b1[0-9].*      80.0
-(vcu1525|u200|u250)      Rocket[0-9]*[a-z].*m4      80.0
-(vcu1525|u200|u250)      Rocket[0-9]*[a-z].*m2      100.0
-(vcu1525|u200|u250)      Rocket.*                   125.0
+(vcu1525|u200|u250|u280)      Rocket64.*f25              25.0
+(vcu1525|u200|u250|u280)      Rocket64.*f40              40.0
+(vcu1525|u200|u250|u280)      Rocket64.*f50              50.0
+(vcu1525|u200|u250|u280)      Rocket64.*f62              62.5
+(vcu1525|u200|u250|u280)      Rocket64.*gem.*            31.25
+(vcu1525|u200|u250|u280)      Rocket64[xyz].*            31.25
+(vcu1525|u200|u250|u280)      Rocket[0-9]*b[2-9][0-9].*  62.5
+(vcu1525|u200|u250|u280)      Rocket[0-9]*b1[0-9].*      80.0
+(vcu1525|u200|u250|u280)      Rocket[0-9]*[a-z].*m4      80.0
+(vcu1525|u200|u250|u280)      Rocket[0-9]*[a-z].*m2      100.0
+(vcu1525|u200|u250|u280)      Rocket.*                   125.0
 
 (x3522pv)          Rocket32s1            200.0
 (x3522pv)          Rocket64b1            160.0
