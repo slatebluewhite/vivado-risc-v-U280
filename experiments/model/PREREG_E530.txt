@@ -1,0 +1,13 @@
+E530 사전등록 — 바닥 2 를 SoC 인도물로: Rocket64b1gem8ssf2 의 elaboration 과 Verilog
+
+바닥 2 패키지는 하네스에서만 존재한다. 이 보드에서 이득인 기하(8x8)로 SoC 구성을
+추가하고 E514/E515 의 관문을 통과시킨다.
+
+[예측]
+  [1] system.dts elaboration 통과 (require: acc_banks=4 >= maxSeg ✓, id 산식 11)
+  [2] system-u280.v 생성 성공, 그 안에:
+      - ShapeshiftMeshWithDelays / shape_reg 실재
+      - per-bank own_adder x4 (E508)
+      - **누산기 쓰기 skid queue 인스턴스 'wq' x4** (E516 — 바닥<4 에서만 elaborate)
+  [3] 기존 Rocket64b1gem16ss (rowFloor 기본 4) 는 이 변경으로 재-elaborate 해도 동일
+      (인자 기본값이라 회로 불변 — dts 재생성으로 확인)

@@ -1,0 +1,110 @@
+// bigK.c — K>3072에서 a(청크)의 상승 추세를 잰다 (E285).
+// E284: 모델이 a(청크8)를 K<=3072 평균 1.30으로 썼는데 K=4096에서 1.58, 6144에서 1.80.
+// 평균이 아니라 추세였다. K를 8192까지 밀어 곡선을 채운다. N=768 고정(b가 작다).
+// 사전 등록: experiments/model/PREREG_E271.txt
+// 사전 등록: experiments/model/PREREG_E269.txt
+//
+// E260: 곡선은 블록 모양을 넘어 옮겨가지 않는다(−44%~+57%). 그리고 (8,4)가
+// (4,6)보다 m=3에서 항상 빠른데(최대 23%), 나는 E241~E259를 (4,6)에서 세웠다.
+// 여기서 확인할 것 두 가지:
+//   (1) 결합 형태가 여전히 p≈2인가 (max도 가법도 아닌가)
+//   (2) η가 여전히 M에 무관한가
+// 구조가 블록에 무관하면 모델의 일반성이 한 단계 올라간다.
+//
+// N은 384의 배수 -> Ntil이 24의 배수 -> nj가 6의 배수 -> m=2,3 모두 불균형 1.0, 꼬리 없음.
+// K는 256의 배수 -> Ktil이 16의 배수 -> K 분할도 딱 떨어짐.
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
+#include <unistd.h>
+#include <sched.h>
+#include <time.h>
+#include <sys/mman.h>
+#include "include/gemmini_rt.h"
+static const grt_ctx AC[3] = {
+  { .dim=16, .elem_bytes=1, .acc_bytes=4, .opcode=GRT_OP_INT8 },
+  { .dim=16, .elem_bytes=1, .acc_bytes=4, .opcode=GRT_OP_FP32 },
+  { .dim=16, .elem_bytes=1, .acc_bytes=4, .opcode=GRT_OP_C1   },
+};
+#define MMAX 128
+#define KMAX 8192
+#define NMAX 768
+#define FREQ 50.0e6
+static int BI=8, BJ=4;
+static int KCv=16;
+static int8_t A[MMAX*KMAX] __attribute__((aligned(64)));
+#define BMAX (8192*768)
+static int8_t B[BMAX]      __attribute__((aligned(64)));
+static int8_t C[MMAX*NMAX] __attribute__((aligned(64)));
+static int8_t REF[MMAX*NMAX];
+static int MM,KK,NN;
+typedef struct { int jb,i0,step,done; } iter;
+static void it_step(int a, iter *s){
+  if(s->done) return;
+  int TI=MM/16, Ntil=NN/16;
+  int j0=s->jb*BJ; int J=(j0+BJ<=Ntil)?BJ:(Ntil-j0);
+  int I=(s->i0+BI<=TI)?BI:(TI-s->i0);
+  grt_block_ksplit(&AC[a], I,J,KK/16,KCv,
+                   A+(size_t)s->i0*16*KK, B+(size_t)j0*16,
+                   C+(size_t)s->i0*16*NN+(size_t)j0*16, KK,NN,NN, 1);
+  s->i0 += BI;
+  if(s->i0>=TI){ s->i0=0; s->jb+=s->step; if(s->jb*BJ>=Ntil) s->done=1; } }
+static void run(int m){
+  iter s[3];
+  for(int a=0;a<m;a++){ grt_loop_ws_config(&AC[a], KK,NN,NN);
+    s[a]=(iter){a,0,m,0}; if(a*BJ>=NN/16) s[a].done=1; }
+  int left; do{ left=0;
+    for(int a=0;a<m;a++){ it_step(a,&s[a]); if(!s[a].done) left++; } }while(left);
+  grt_fence(); }
+static FILE *g;
+static void mark(const char *f,...){ if(!g)return; va_list ap; va_start(ap,f);
+  vfprintf(g,f,ap); va_end(ap); fprintf(g,"\n"); fflush(g); fsync(fileno(g)); }
+static double now(void){ struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t);
+  return t.tv_sec+t.tv_nsec*1e-9; }
+static void fill(void){
+  memset(A,0,(size_t)MM*KK);
+  for(int r=0;r<MM;r++){ int p=r%(KK-1); A[(size_t)r*KK+p]=1; A[(size_t)r*KK+p+1]=1; }
+  for(int r=0;r<KK;r++) for(int c=0;c<NN;c++) B[(size_t)r*NN+c]=(int8_t)((r*3+c*5)%7-3);
+  for(int r=0;r<MM;r++){ int p=r%(KK-1);
+    for(int c=0;c<NN;c++)
+      REF[(size_t)r*NN+c]=(int8_t)(B[(size_t)p*NN+c]+B[(size_t)(p+1)*NN+c]); } }
+static int chk(void){ int b=0;
+  for(int r=0;r<MM;r++) for(int c=0;c<NN;c++)
+    if(C[(size_t)r*NN+c]!=REF[(size_t)r*NN+c]) b++; return b; }
+static void one(void){
+  fill();
+  double roof=(double)MM*KK*NN/256.0/FREQ, t[3]; int bad=0;
+  for(int m=1;m<=3;m++){
+    run(m); double b=1e30;
+    for(int r=0;r<5;r++){ memset(C,0,(size_t)MM*NN);
+      double t0=now(); run(m); double d=now()-t0; if(d<b)b=d; bad+=chk(); }
+    t[m-1]=b; }
+  mark("(%d,%d) Kc=%2d 청크%3d 타일%4d | %9.3f %9.3f %9.3f | %5.2f %5.2f %5.2f | %s",
+       BI,BJ,KCv,(KK/16+KCv-1)/KCv,KCv*(BI+BJ),t[0]*1e3,t[1]*1e3,t[2]*1e3,
+       t[0]/roof,t[1]/(roof/2),t[2]/(roof/3), bad?"FAIL":"PASS"); }
+int main(int argc,char**argv){
+  g=fopen(argc>1?argv[1]:"/mnt2/tmp/blk84.log","w");
+  if(!g){perror("로그");exit(1);}
+  if(mlockall(MCL_CURRENT|MCL_FUTURE)!=0) mark("mlockall 실패(계속)");
+  cpu_set_t cs; CPU_ZERO(&cs); CPU_SET(0,&cs); sched_setaffinity(0,sizeof(cs),&cs); sched_yield();
+  for(int a=0;a<3;a++) grt_flush_ctx(&AC[a]);
+  mark("=== 큰 K에서 a(청크) (권장 구성, M=128, N=768, best-of-5) ===");
+  mark("E284: 청크8의 a가 K<=3072에서 1.19~1.38, 4096에서 1.58, 6144에서 1.80");
+  mark("%5s %11s %4s %7s %9s | %9s %9s %9s | %11s | %s",
+       "Kc","형상","청크","루프라인","","m=1","m=2","m=3","η(2) η(3)","정확성");
+  int Ks[]={3072,4096,5120,6144,8192};
+  int CH[]={4,8,16};
+  int SI[]={4,8}, SJ[]={4,4};
+  MM=128; NN=768;
+  for(int b=0;b<2;b++){ BI=SI[b]; BJ=SJ[b];
+    for(int ki=0;ki<5;ki++){ KK=Ks[ki];
+      int Ktil=KK/16;
+      for(int c=0;c<3;c++){
+        if (Ktil % CH[c]) continue;
+        KCv = Ktil / CH[c];
+        if (KCv*(BI+BJ) > 512) continue;
+        one(); } } }
+  mark("=== BLK84_DONE ===");
+  return 0; }

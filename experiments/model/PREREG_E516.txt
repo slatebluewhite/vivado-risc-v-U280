@@ -1,0 +1,17 @@
+E516 사전등록 — EC 쓰기 경로에 skid queue 를 넣어 바닥 2 를 해금한다
+
+E511: 바닥 2 가 죽는 이유는 AccumulatorMem 의 WAW 인터록(write.ready 강하)을 EC 가
+처리하지 못해서다 (assert 'write was skipped'). 수정: shapeshift_row_floor < 4 일 때만
+EC 의 각 누산기 쓰기 포트 앞에 Queue(depth 4) 를 넣는다. 지속 유량 논증: 같은 주소
+쓰기는 바닥 f=2 간격으로 오고 인터록 창은 acc_latency=2 이므로 지속 적체는 없다 —
+큐는 과도 구간만 흡수하면 된다. 기본(바닥 4) 경로는 guard 로 문자 그대로 보존.
+
+[예측]
+  [1] 8x8 ms8 (1,4,32), 바닥 2, accMode=2: assert 없이 완주, 네 shape golden 일치,
+      음성 대조 발화. (E511 에서 같은 구성이 425 ns 에 assert 로 죽었다.)
+  [2] 사이클은 모형의 4 -> 2 치환 (총행 max(M,h,2), 드레인 h+max(h,2)+cols+4) 을 따른다:
+      8x8 (1,4,32) 바닥2: S=1/2/4/8 = 53 / 25 / 19 / 22
+      (바닥4 는 53 / 25 / 23 / 30 — S=4 가 4 사이클, S=8 이 8 사이클 준다)
+  [3] 바닥 4 경로 불변: SSExecArea(기본 인자) 재-emit 이 기존 Verilog 와 diff 0.
+
+틀리면: [2] 의 상수(+4 꼬리)가 바닥과 얽혀 있다는 뜻 — 그 자체가 모형 정보다.

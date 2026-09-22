@@ -1,0 +1,28 @@
+E507 사전등록 — 진짜 AccumulatorMem 을 물려 정확성 전체를 다시 검증한다
+
+E506 이 드러낸 것: 이 트랙의 harness 는 누산기를
+    val accMem = Reg(Vec(maxSeg, Vec(ACCR, Vec(cols, SInt(32.W)))))
+즉 **지연 0 의 레지스터 파일**로 모형화한다. 진짜 `AccumulatorMem` 은
+`pipelined_writes: Vec(acc_latency, ...)` 로 쓰기를 파이프라인하고 RMW 덧셈은
+stage 0 에서 읽는다. 그래서 바닥 4 가 존재한다.
+
+**이것은 바닥 질문보다 큰 문제다.** shapeshift 가 바꾼 것이 바로 누산기 쓰기 경로
+(세그먼트 s -> 뱅크 w_bank+s)인데, E446~E506 의 모든 정확성 결과가 그 경로를
+가짜 모형으로 검증했다. 진짜 모듈에서만 나타나는 오류가 있으면 전부 못 봤다.
+
+`AccumulatorMem` 의 `adder` 는 모듈 밖으로 나와 있어 (op1/op2/sum) 직접 물릴 수 있고,
+`Scratchpad.scala:637` 이 그 패턴을 보여준다. harness 에 acc_banks 개를 인스턴스화하고
+write 포트를 ExecuteController 에 연결한 뒤, read 포트로 읽어 golden 과 대조한다.
+
+[예측]
+  [1] 진짜 AccumulatorMem 을 물려도 **정상 shape 는 통과**한다 (h>=2, 바닥 4).
+      가짜 모형이 통과시킨 것이 진짜에서 깨진다면 이 트랙의 결과가 대부분 무효가 되는데,
+      그럴 가능성은 낮다고 본다 — 쓰기 인터페이스(addr/data/acc/bank)는 같고
+      shapeshift 가 바꾼 것은 **어느 뱅크로 보내느냐** 뿐이기 때문이다.
+  [2] 음성 대조는 여전히 발화한다.
+  [3] **바닥 2 는 이제 실패한다** — 해저드가 모형 안에 들어왔으므로. 이것이 E506 의
+      '증거가 아니다' 를 증거로 바꾸는 시험이고, 동시에 새 harness 가 실제로
+      해저드를 볼 수 있는지에 대한 음성 대조다.
+
+[3] 이 핵심이다. 바닥 2 가 그래도 통과하면 새 harness 도 해저드를 못 보는 것이고,
+    그러면 acc_latency 나 adder 배선을 잘못한 것이다.

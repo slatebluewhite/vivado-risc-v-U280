@@ -1,0 +1,22 @@
+E547 사전등록 — 실증 트랙 1단계: 현재 보드에서 접기 이득 실측 (보드 제약 해제, 사용자 승인)
+
+예측 (experiments/model/gemv_demo.py, E501 닫힌 형태 + E467 모형 + E498 roofline):
+[1] L2 상주 워크로드(GRU H<=256, MLP head, tf decode H=192, ResNet 1x1 C=3)는
+    16x16에서 1.44~1.53x, small batch K=8 은 1.62x.
+[2] DRAM 스트리밍 워크로드(H=512 이상 decode)는 1.00x (±5%).
+[3] 실측 허용 오차: L2 케이스 ±20% (roofline max() 의 근사 오차, E498 급),
+    방향(이득 있음/없음)은 전 케이스 적중해야 한다.
+측정 규약: chrt -f 99, 프로세스 재기동 5회 최소값, 비트스트림 서명 스탬프 (CLAUDE.md).
+빌드: Rocket64b1gem16ss (16x16 ms4, floor 4) BOARD=u280.
+
+수정 (보드 측정 전, 데모 설계 중 발견): 위 [1]의 1.44~1.62x 는 **T_issue 를 빠뜨린
+예측**이다. 접기는 pass 수(N·K/256, S-불변)가 아니라 pass 길이(max(M,h,4))만 줄이는데,
+tile 당 명령 2개(~27사이클, c_issue 13.4 실측)가 pass 길이(S=1: 16, S=4: 4)를 이미
+넘는다 — tile-by-tile 발행에서는 GEMV 가 명령 발행에 갇힌다.
+[1'] (교체) tile-by-tile 로는 L2 상주 케이스에서도 S=1 과 S=4 가 ±15% 이내로 같다
+     (둘 다 ~27사이클/tile 명령 바운드). 접기 이득은 나오지 않는다.
+[2] (유지) DRAM 케이스 1.00x.
+[4] 이득의 실물화에는 shape-aware loop_ws (loop FSM 의 세그먼트 주소 생성)가 필요하다
+    — 별도 RTL 마일스톤.
+원 [1]은 "execute 파이프라인 한정 이득"으로 재해석해 보존한다 (loop_ws 통합 후의
+기대치가 그것이다).

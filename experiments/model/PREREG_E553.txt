@@ -1,0 +1,12 @@
+E553 사전등록 — 비트스트림 #3 (3단 게이트 + ShapeshiftGemvLoop) 보드 측정
+
+측정: ssgemv, H=128, T=2000, chrt -f 99, 셀 단위 + NFS 로그, 타이밍 셀은 재기동
+5회 최소값. 순서: mode t sh 0/1/2 (정확성) → mode f sh 0/1/2.
+
+[1] mode t: shape 1/2 가 이번엔 PASS — E551 의 읽기-지연 버그가 보드 실패(E549)의
+    원인이었다면. (FAIL 이면 보드에는 또 다른 미검 이음새가 있다 — 그것대로 수확.)
+[2] mode t 사이클은 shape 무관 ±15% (E547 [1'] 명령 바운드 — 여전히 유효한 예측).
+[3] mode f: 언롤러 경로 첫 실리콘. 위험: reservation station 이음새는 어느 하네스에도
+    없다 — FAIL/wedge 면 Controller-레벨 시뮬로 복귀.
+[4] mode f 접기 이득 = f/sh0 ÷ f/sh2 ≈ 2.5~3.5x (모형: 실행 1064 vs 284 + mvout/mvin
+    /경계 오버헤드). f/sh0 자체는 mode t sh0(1374.5)와 ±20% 이내.

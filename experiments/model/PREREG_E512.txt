@@ -1,0 +1,12 @@
+E512 사전등록 — E508 수정(per-bank adder)의 면적 델타
+
+E508 은 '(acc_banks-1) x cols 개의 32-bit adder 파이프, 대략 수백 LUT' 로 추정만 했다.
+SSExecArea 는 Scratchpad 를 포함하지 않으므로 기존 면적표에 이 비용이 없다. 바뀐
+부분(adder 복합체)만 격리해 두 판으로 OOC 합성한다: 공유 1개 vs 뱅크별 4개 (16 lanes,
+32b, latency = acc_latency-1 = 1).
+
+[예측] 셈: 공유판 = 16개 32b 가산기 + Mux1H(4-to-1, 폭 2x512b) + 파이프 FF 512b.
+       per-bank 판 = 64개 가산기 + Mux 없음 + FF 2048b.
+  [1] 델타 LUT = 1,000~2,500 (가산기 48개 x ~32 LUT = ~1,536, Mux1H 제거로 일부 상쇄)
+  [2] 델타 FF ~ +1,536 (512 -> 2048)
+  [3] 32x32 ms8 기준 ExecuteController+수정 전체 대비 1% 미만 — 결론(수정이 싸다) 유지

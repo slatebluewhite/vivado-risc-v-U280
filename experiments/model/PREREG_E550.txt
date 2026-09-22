@@ -1,0 +1,13 @@
+E550 사전등록 — 보드 실패(E549)의 xsim 재현: sp_banks=4 wrap
+
+하네스: SeqShapes fill 을 wrap-인지로 확장 (spBanksOv=4, bRowBase=256).
+셀: 16x16 ms4 floor4 (4,4,64), spBanksOv=4 — seq (0,0,0)/(1,1,0)/(2,2,0),
+대조군: 같은 셀 spBanksOv=0(뱅크 8, 기존 구성).
+
+[1] (2,2,0) [S=4, wrap]: 실패 재현 — hang(phase 끝 0/총 미갱신) 또는 불일치.
+    기전 가설: 접힌 B 세그먼트 읽기가 stock Operand 스케줄러 밖이라 A(뱅크 0)와
+    B seg3(뱅크 0 wrap)의 읽기 포트 경합에 조정자가 없다.
+[2] (0,0,0) [S=1]: PASS (보드 shape 0 PASS 와 일치).
+[3] (1,1,0) [S=2, wrap 없음]: 약속 없음 — xsim PASS 면 보드의 S=2 부분 0 은
+    Scratchpad 모듈 이음새(별개 버그)로 분리된다.
+[4] 대조군(뱅크 8) 3칸 전부 PASS 유지 (하네스 확장의 회귀 없음).

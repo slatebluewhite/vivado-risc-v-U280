@@ -1,0 +1,23 @@
+E508 사전등록 — 진짜 누산기 실패의 기전은 공유 AccPipeShared 의 Mux1H 충돌이다
+
+E507/E507b: 진짜 AccumulatorMem 을 물리면 chunk>1 인 접힌 shape(S=4,S=8)만 golden
+불일치(zzzz1100). 조합 adder 로도, 올바른 공유 파이프라인 adder 로도 같았다.
+
+[기전 가설] stock 은 ExecuteController 가 한 번에 한 누산기 뱅크만 몰므로
+Scratchpad 의 공유 AccPipeShared(Mux1H 선택)가 안전하다. shapeshift 는 세그먼트마다
+뱅크 하나씩, **같은 사이클에 S 개 뱅크**에 쓴다. chunk>0 이면 acc=true 이므로
+S 개 뱅크가 동시에 adder.valid 를 올리고, Mux1H 는 다중 선택에서 무의미한 값을 낸다.
+
+[판별] adderConflict(두 뱅크 이상 동시 adder.valid) 를 shape 별로 노출했다.
+
+[예측]
+  [1] aconf = 1100 — **정확히 실패한 shape 에서만** 충돌이 관측된다.
+      (S=1: 뱅크 하나뿐. S=2: ch=1 이라 accumulate 없음. S=4,S=8: ch>1, 다중 뱅크.)
+  [2] 뱅크마다 자기 adder 를 주면(accMode=2) 같은 구성이 **전부 통과**하고 aconf=0.
+  [3] 이는 harness 만의 문제가 아니라 **실전 Scratchpad 경로의 버그**다 —
+      Scratchpad.scala 의 acc_adders 가 같은 공유 구조이므로, 전체 SoC 빌드에서도
+      K 분할 접힌 matmul 은 틀린 결과를 낸다. 수정은 shapeshift_max_segments>1 일 때
+      per-bank adder (guarded, stock 경로 불변).
+
+빗나가면: aconf=0000 인데 실패가 계속되면 기전은 pipelined_writes 쪽(WAW/RAW)이고
+          바닥 4 가 접힌 경우를 못 지키는 것이다 — 그때는 쓰기 간격을 찍어야 한다.

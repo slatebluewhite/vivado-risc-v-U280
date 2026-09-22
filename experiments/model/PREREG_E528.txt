@@ -1,0 +1,14 @@
+E528 사전등록 — chunk-major 발행으로 바닥 2 의 WAW 유량 한계를 스케줄만으로 푼다
+
+E527: 같은 주소 누적의 도착 간격 2 < 서비스 간격 3 -> 적체 무한. chunk-major (tt 바깥
+루프)는 같은 누산기 행의 재방문 간격을 tr -> nt*tr 로 벌린다. nt>=2 면 간격 >= 4 > 3.
+
+[예측] 8x8 ms4 S=4(h=2), M=1, 바닥 2, accMode=2, chunk-major:
+  [1] (8,128) ch4·nt4: E527 에서 overflow 로 죽던 칸이 **완주·golden 일치**, 사이클 = 47+1 = 48
+  [2] (8,64)  ch4·nt2: 31+1 = 32  (tile-major 37 대비 -5)
+  [3] (4,64)  ch2·nt2: 23+1 = 24  (tile-major 25 대비 -1)
+  [4] (8,32)  ch4·nt1: chunk-major == tile-major 이므로 **27 그대로** (stall = ch-1 잔존)
+  [5] 음성 대조 발화, 바닥 4 chunk-major 정확성도 통과 (순서는 정확성에 중립)
+
+맞으면: '바닥 2 + chunk-major' 가 완전한 조합이 되고, 컴파일러 규칙에
+'f<4 면 chunk-major 로 발행' 이 추가된다. nt=1 잔존 stall 은 구조적(교차할 타일이 없음).

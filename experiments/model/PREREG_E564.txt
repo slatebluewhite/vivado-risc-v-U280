@@ -1,0 +1,38 @@
+# PREREG E564 — SSExecRS: ReservationStation 을 xsim 에 넣는다 (2026-08-28, 실행 전 등록)
+
+## 배경
+보드 규칙 (E563): "mvout 뒤 연속 matmul 은 16개까지만 acc 에 착지, 17번째부터 소실.
+fence 는 리셋 안 함, mvout 이 리셋" (Q1: T=17 -> T16 부분합, Q2: 17번째 신선한 행 -> 0,
+Q3: tile 마다 fence -> 정확, Q4: 12+fence+12 -> T16 부분합). 16 = reservation_station_entries_ex.
+잔여 모순: t0(S=1)/t1(S=2) 는 mvout 사이 64-tile 체인인데 PASS — 규칙이 S=4(shape 2)에서만 발화.
+
+시뮬은 지금까지 EC 에 rob_id.valid=false 로 명령을 넣었다 — **EC completion 경로와 RS 의
+의존 추적·엔트리 해제는 시뮬에서 한 번도 검증된 적이 없다.** SSExecRS 가 그 층을 연다:
+cmd ROM -> RS.alloc -> RS.issue.ex -> EC(+rob_id) -> io.completed -> RS, RS.issue.st -> FakeStore
+(stDelay 뒤 진짜 AccumulatorMem 읽기 = mvout 의 acc 읽기) -> completed.
+
+또한 보드가 구분 못 한 것을 하네스는 구분한다: mvout 캡처(capT)와 chkAt 시점의 acc 실체(accT).
+"소실"(영원히 안 씀)과 "경주"(mvout 이 이르게 읽음, 값은 나중에 착지)는 보드에서 같은 증상이다.
+
+## 격자 (16x16, maxSeg=4, sp_banks=4 wrap(보드 동일), real acc(accMode2 상당), readDelay=4, M=1)
+R1: sh=2, T=17, preSt=1, stDelay=50            (보드 Q1 유사)
+R2: sh=2, T=17, freshLast=1, stDelay=50        (보드 Q2 유사)
+R3: sh=2, T=24, fenceEvery=12, stDelay=50      (보드 Q4 유사)
+R4: sh=0, T=17, preSt=1                        (보드 t0 유사 — 통과해야 함)
+R5: sh=1, T=17, preSt=1                        (보드 t1 유사 — 통과해야 함)
+R6: R1 + sab=1                                 (음성 대조 — capT/accT 불일치 발화해야 함)
+R7: R1 + stDelay=5,  R8: R1 + stDelay=200      (경주-구조 판별)
+
+## 가설과 예측 (판별 조건 포함)
+H-A 재현+경주: R1 capT<17, accT=17(완전). capT 가 stDelay 에 따라 움직인다 (R7<R1<R8).
+H-B 재현+소실: R1 capT=16, accT=16. stDelay 무관 (R7=R1=R8=16). R2 캡처=0 이고 acc 도 미착지.
+H-C 미재현: R1~R5 전부 capT=T(정확). 결함은 RS+EC 조합 밖 — 미모델 잔여층은
+    Scratchpad glue(acc read/write 중재, AccumulatorScale), DMA/TLB, frontend 큐, LoopMatmul.
+
+사전 확률 (직감 기록): H-C 40%, H-A 35%, H-B 25%.
+근거: 같은 EC 가 SeqShapes 에서 긴 체인을 통과했으므로 EC 단독은 깨끗; RS 가 더하는 것은
+completion 타이밍과 의존 추적인데, 보드 Q4(fence 무영향, 정확히 16)는 순수 경주로는 설명이
+어렵다 (경주라면 마지막 완료 직후 읽으므로 23-부분합이어야 한다).
+
+주의: H-C 라도 R4/R5 와 R1 의 사이클 구조 비교(issue 간격, completion 지연)는 보드 원인의
+후보 축소에 쓴다. 어떤 결과든 JOURNAL E564 에 기록.

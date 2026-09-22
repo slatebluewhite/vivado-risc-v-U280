@@ -1,0 +1,11 @@
+E551 사전등록 — spad_read_delay=4 재현 (E550 [1] 기각 후의 새 유력 용의자)
+
+발견: EC 읽기 응답의 4사이클 파이프는 Scratchpad 모듈(497행)에 있고 하네스는 뱅크
+직결(지연 0)이었다 — 접힌 gather 는 지연 4 에서 검증된 적이 없다.
+하네스에 readDelayOv 노브 추가 (SoC 규약 답습: Pipeline(resp, N)).
+
+격자: 16x16 ms4 f4 (4,4,64), (0,0,0)/(1,1,0)/(2,2,0) × {delay=4·banks=8, delay=4·banks=4}.
+[1] delay=4 에서 접힌 shape(S=2 그리고/또는 S=4)의 실패가 재현된다 —
+    실패 양상이 보드와 같은 무늬(S=2 부분 오답, S=4 hang)면 근인 확정.
+[2] S=1 은 delay=4 에서도 PASS (보드 shape 0 PASS 와 일치해야).
+[3] banks=8/4 이 같은 결과면 wrap 무관 확정 (E550 [1] 기각의 확인).

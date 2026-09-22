@@ -1,0 +1,13 @@
+E559 사전등록 — 보드 t2 의 하네스 재현 최종 후보: 진짜 AccumulatorMem 의 WAW 드롭
+
+근거: ssdiag2 이분탐색(보드) — stage A(순수 preload/compute 64 tile)만으로 출력
+128/128 오답, 2번째 timestep 에서 wedge. SeqShapes 하네스는 acc ready := true.B 로
+무조건 수납하지만 실제 AccumulatorMem 은 WAW 인터록에서 ready 를 내리고, floor-4
+EC 는 ready 를 무시(assert 는 FPGA 에서 소거) — M=1 에서 같은 acc 행 재방문 간격이
+t0=16, t1=8, **t2=4(경계)** 로 t2 만 위험.
+
+[1] XTop(accMode=2, 진짜 acc+per-bank adder), 16x16 ms4, M=1 K=128 N=128:
+    **shape2(S=4) 가 golden 과 불일치** (xmismatch bit2 또는 gbad — shape0 도 관련
+    시 함께). shape0/1 은 재방문 16/8 사이클이라 무사 예측.
+[2] 재현되면 수정 = E516 skid queue 를 floor 4 에도 (또는 ready-aware 발행) → 재검증
+    → 비트스트림 #5. 안 되면 남는 이음새는 RS/mvout 경로.

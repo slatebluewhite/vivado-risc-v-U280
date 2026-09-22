@@ -1,0 +1,14 @@
+E515 사전등록 — 전체 SoC 의 FIRRTL -> Verilog, 그리고 수정이 SoC Verilog 에 실재하는지
+
+E514 는 Rocket64b1gem16ss 의 elaboration(system.dts)까지 확인했다. 다음 단계:
+  make CONFIG=rocket64b1gem16ss BOARD=u280 workspace/rocket64b1gem16ss/system-u280.v
+bootrom 이 dts 를 물고 재-elaborate 된 뒤 FIRRTL 이 Verilog 를 낸다. 이것이 bitstream
+파이프라인에서 트랙 범위(시뮬·합성) 안의 마지막 관문이다 — Vivado 합성 자체는 수 시간이라
+이번 iteration 밖.
+
+[예측]
+  [1] system-u280.v 생성 성공.
+  [2] 생성된 Verilog 에 SSGemm 구조가 실재한다: ShapeshiftMeshWithDelays 모듈, 그리고
+      **Scratchpad 의 per-bank adder** — AccPipeShared 인스턴스가 공유 1개가 아니라
+      뱅크 수(4)만큼 있다. E508 수정이 harness 만이 아니라 SoC 산출물에 닿는지의 확인.
+  [3] stock 대비 이 파일에서만 새로 깨질 것은 없다 (FIRRTL 은 기계적 변환).

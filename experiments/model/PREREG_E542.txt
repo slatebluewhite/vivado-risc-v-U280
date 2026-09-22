@@ -1,0 +1,10 @@
+E542 사전등록 — E539/E540 수정 후 EC 면적 재검 (OOC, E481 규약)
+
+수정 내역: total_rows 기본값·mesh req 기본값에 maxOf(·, floor) (E539),
+config_ex 정지 가드 ss_cfg_ok = 3비트 카운터 + idle 논리 (E540).
+
+[1] 16x16 EC: maxSeg=4 vs maxSeg=1 LUT 델타는 +7.01% (E481) 에서 **±0.3%p 이내**
+    (가드+maxOf 는 128k LUT 대비 수십 LUT 규모).
+[2] 임계 경로 변화 ±0.1 ns 이내 (가드는 config 수락 경로에만 붙고 데이터패스 불변).
+[3] maxSeg=1 판은 ss_cfg_ok=true.B 상수 접힘으로 stock 구조 유지 — E481 절대값과의
+    비교는 하네스 기본 인자가 그동안 바뀌었으면 무의미하므로, 같은 실행 안의 쌍만 본다.

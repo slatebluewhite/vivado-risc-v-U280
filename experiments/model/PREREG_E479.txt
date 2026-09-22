@@ -1,0 +1,20 @@
+E479 사전등록 — N 축에도 같은 버그가 있는가
+
+E478 의 교훈: 모형은 `ceil` 인데 harness 가 `floor` 면 harness 가 틀린다.
+K 축은 고쳤는데 **N 축은 안 봤다**:
+    val nTiles = math.max(1, nTotal / width)     <- 정수 나눗셈
+모형은 `ceil(N/(cols*S))` 이다. 따라서 N 이 width 의 배수가 아니면 마지막 타일이 통째로
+빠지고 그만큼의 출력 열이 계산되지 않는다.
+
+측정: 8x8 / maxSeg=4, (M,K,N) = (4,4,12).  width = 8/16/32
+  S=1: width=8, floor=1, ceil=2  -> 다르다 (버그가 드러난다)
+  S=2: width=16, floor=0, ceil=1  -> 다르다 (버그가 드러난다)
+  S=4: width=32, floor=0, ceil=1  -> 다르다 (버그가 드러난다)
+
+등록하는 것:
+  [A] **고치기 전**: golden 불일치 = 1 이 나온다. shape 0 (S=1, width=8) 이
+      12 열 중 8 열만 계산하므로 절대 golden 과 어긋난다.
+  [B] `nTiles` 를 ceil 로 고치면 세 shape 모두 통과한다. 명령은 안 고쳐도 된다 —
+      마지막 타일이 넘치게 계산하지만 남는 열은 검사 범위 밖이고 accumulator 영역도
+      타일별로 분리돼 있다.
+  [C] 사이클은 모형이 이미 ceil 이므로 예측대로 나온다.

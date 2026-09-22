@@ -1,0 +1,16 @@
+E514 사전등록 — 남은 앵커(M=8)와 전체 SoC 통합 elaboration
+
+[A] E503 경계 반전의 M=8 쪽은 아직 가짜 acc 측정뿐이다 (e503.log 의 148/108).
+    real acc(accMode=2) 재측정. 모형:
+      8x8 ms2 (8,16,64): S=1 156, S=2 148
+      16x16 ms1 (8,16,64): S=1 108
+[B] 전체 SoC 구성 Rocket64b1gem16ss 는 E446 이후의 모든 변경(EC 수정, require 들,
+    Scratchpad per-bank adder) 전에 만들어져 재-elaborate 된 적이 없다.
+    make workspace/rocket64b1gem16ss/system.dts 로 elaboration 만 확인한다.
+
+[예측]
+  [1] A: 사이클 156/148, 108 — 가짜 acc 와 동일 (바닥 4 간격이라 backpressure 미발화).
+      dut(real)-refs(fake) 비교도 통과.
+  [2] B: elaboration 통과. acc_banks=4 로 require 를 만족하고, guarded 수정은
+      기본 경로를 안 바꾼다. 단 이것은 검증 없는 확언이 아니라 시험이다 —
+      깨지면 그것이 이 iteration 의 진짜 산출물이다.
